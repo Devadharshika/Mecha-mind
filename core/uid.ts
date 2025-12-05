@@ -1,0 +1,8 @@
+// core/uid.ts
+
+let counter = 0;
+
+export function uid(prefix = "mm"): string {
+  counter += 1;
+  return `${prefix}-${Date.now().toString(36)}-${counter.toString(36)}`;
+}
