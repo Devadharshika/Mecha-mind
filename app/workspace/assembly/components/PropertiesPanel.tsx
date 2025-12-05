@@ -3,15 +3,25 @@
 import { useEffect, useState } from "react";
 import { useAssembly } from "../../../../store/assemblyStore";
 
-// Keep in sync with DEMO_PARTS above for now
-const DEMO_PARTS = [
+type DemoPart = {
+  id: string;
+  name: string;
+  code: string;
+  category: string;
+  subtype: string;
+  description: string;
+  premiumTier: string;
+};
+
+const DEMO_PARTS: DemoPart[] = [
   {
     id: "demo-frame",
     name: "Demo Frame",
     code: "STR-DEMO-FRAME",
     category: "structure",
     subtype: "frame",
-    description: "Basic demo structural frame used to test the properties panel.",
+    description:
+      "Basic demo structural frame used to test the properties panel.",
     premiumTier: "standard",
   },
   {
@@ -41,7 +51,7 @@ export function PropertiesPanel() {
 
   useEffect(() => {
     setName(node?.name ?? "");
-  }, [node?.id]);
+  }, [node?.id, node?.name]);
 
   if (!node) {
     return (
@@ -56,9 +66,8 @@ export function PropertiesPanel() {
     );
   }
 
-  const part = node.partId
-    ? DEMO_PARTS.find((p) => p.id === node.partId)
-    : null;
+  const part: DemoPart | null =
+    node.partId ? DEMO_PARTS.find((p) => p.id === node.partId) ?? null : null;
 
   return (
     <div className="border border-slate-800 rounded-xl bg-slate-900/60 backdrop-blur p-3 h-full flex flex-col">
@@ -66,6 +75,7 @@ export function PropertiesPanel() {
         Properties
       </h2>
 
+      {/* Node basic info */}
       <div className="mb-3">
         <label className="text-[11px] text-slate-400 mb-1 block">
           Node name
@@ -103,8 +113,9 @@ export function PropertiesPanel() {
         </div>
       </div>
 
+      {/* Part details, if a part is attached */}
       {part && (
-        <div className="mt-2 border-t border-slate-800 pt-2 text-[11px] text-slate-400 space-y-1">
+        <div className="mt-2 border-top border-slate-800 pt-2 text-[11px] text-slate-400 space-y-1">
           <div className="font-semibold text-slate-200">Part details</div>
           <div>
             <span className="text-slate-500">Code:</span> {part.code}
