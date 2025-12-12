@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   Bot,
   Play,
@@ -15,6 +15,7 @@ import {
   Terminal,
 } from "lucide-react";
 
+/* --- keep the robotModels / controlModes you already had --- */
 const robotModels = [
   { id: "arm6dof", label: "6-DOF Industrial Arm" },
   { id: "mobile_rover", label: "Mobile Rover" },
@@ -28,11 +29,76 @@ const controlModes = [
   { id: "auto", label: "Autonomous Script" },
 ];
 
+/* --- NEW: sim core + store imports --- */
+import { useAssembly } from "../../../store/assemblyStore"; // relative from app/workspace/simulate/page.tsx
+import { simService } from "../../../core/sim/simService";
+import { applySimToAssembly } from "../../../core/sim/sync";
+
+/* --- Page component --- */
 export default function SimulateRobotsPage() {
+  // existing UI state
   const [selectedRobot, setSelectedRobot] = useState("arm6dof");
   const [controlMode, setControlMode] = useState("direct");
   const [isRunning, setIsRunning] = useState(false);
 
+  // sim related UI state
+  const [entityCount, setEntityCount] = useState(0);
+  const unsubRef = useRef<(() => void) | null>(null);
+
+  // get assembly store (state + dispatch) via your hook
+  const { state: assemblyState, dispatch } = useAssembly();
+
+  /* -------------------------
+     Snapshot + subscription
+     ------------------------- */
+  useEffect(() => {
+    // create a sim snapshot from the current assembly state
+    // safe to call repeatedly; this refreshes sim state to match assembly
+    try {
+      simService.createSnapshotFromAssembly(assemblyState);
+    } catch (e) {
+      // fail gracefully in dev - service should exist
+      // console.error("sim snapshot error", e);
+    }
+
+    // subscribe to sim updates (entity counts, telemetry, etc.)
+    const unsub = simService.subscribe((s) => {
+      setEntityCount(Object.keys(s.entities).length);
+    });
+    unsubRef.current = unsub;
+
+    // cleanup
+    return () => {
+      if (unsubRef.current) unsubRef.current();
+      unsubRef.current = null;
+    };
+    // Recreate snapshot when the assembly root or nodes change.
+    // If your assemblyState is a new object every render, you may want to depend on rootId only.
+  }, [assemblyState]); // intentionally resnapshot on assembly changes
+
+  /* -------------------------
+     Controls (Start / Pause / Step / Apply)
+     ------------------------- */
+  function onStart() {
+    simService.start();
+    setIsRunning(true);
+  }
+  function onPause() {
+    simService.pause();
+    setIsRunning(false);
+  }
+  function onStep() {
+    simService.stepOnce();
+  }
+  function onApply() {
+    // apply sim transforms back into the assembly store using dispatch
+    // applySimToAssembly expects your dispatch from useAssembly
+    applySimToAssembly(dispatch);
+  }
+
+  /* -------------------------
+     (rest of your existing UI layout below - unchanged except wiring)
+     ------------------------- */
   return (
     <div className="flex flex-col gap-6">
       {/* Header */}
@@ -202,7 +268,11 @@ export default function SimulateRobotsPage() {
               <div className="inline-flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => setIsRunning(true)}
+                  onClick={() => {
+                    onStart();
+                    // keep local UI flag in sync
+                    setIsRunning(true);
+                  }}
                   className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] md:text-xs font-medium transition-all ${
                     isRunning
                       ? "border border-emerald-400/70 bg-emerald-400/15 text-emerald-100"
@@ -214,7 +284,10 @@ export default function SimulateRobotsPage() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setIsRunning(false)}
+                  onClick={() => {
+                    onPause();
+                    setIsRunning(false);
+                  }}
                   className="inline-flex items-center gap-1.5 rounded-full border border-amber-400/60 bg-amber-400/10 px-3 py-1.5 text-[11px] md:text-xs font-medium text-amber-100 hover:bg-amber-400/15"
                 >
                   <Pause className="w-3 h-3" />
@@ -222,6 +295,10 @@ export default function SimulateRobotsPage() {
                 </button>
                 <button
                   type="button"
+                  onClick={() => {
+                    simService.reset(true); // optionally recreate snapshot on reset
+                    setIsRunning(false);
+                  }}
                   className="inline-flex items-center gap-1.5 rounded-full border border-slate-700 bg-slate-900 px-3 py-1.5 text-[11px] md:text-xs font-medium text-slate-300 hover:bg-slate-800"
                 >
                   <RotateCcw className="w-3 h-3" />
@@ -236,6 +313,7 @@ export default function SimulateRobotsPage() {
                   }`}
                 />
                 {isRunning ? "Running" : "Idle"}
+                <span className="ml-3 text-slate-400">Entities: {entityCount}</span>
               </div>
             </div>
 
