@@ -19,8 +19,9 @@ export function assemblyNodesToSimEntities(nodes: Record<string, AssemblyNode>):
     return {
       id: n.id,
       type: "part",
-      position: pos as [number, number, number],
-      rotation: rot as [number, number, number],
+      position: { x: pos[0], y: pos[1], z: pos[2] },
+      rotation: { x: rot[0], y: rot[1], z: rot[2] },
+
       mass: part?.massKg ?? 1,
       meta: {
         partId,

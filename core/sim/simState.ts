@@ -1,14 +1,26 @@
 // core/sim/simState.ts
 export type SimTime = number;
 
-export type SimEntity = {
-  id: string; // maps to AssemblyNode.id
-  type: "part" | "joint" | "sensor";
-  position: [number, number, number];
-  rotation: [number, number, number]; // Euler XYZ (radians)
-  mass?: number;
-  meta?: Record<string, any>;
+export type SimVec3 = {
+  x: number;
+  y: number;
+  z: number;
 };
+
+export type SimEntity = {
+  id: string;
+  type?: string;
+  position: SimVec3;
+  rotation: SimVec3;
+  mass?: number;
+  meta?: {
+    name?: string;
+    category?: string;
+    parentId?: string | null;
+    dimensions?: any;
+  };
+};
+
 
 export type SimJoint = {
   id: string;

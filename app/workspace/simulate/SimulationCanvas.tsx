@@ -5,25 +5,15 @@ import { Canvas, useFrame } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
 
-type Vec3 = [number, number, number];
-
 type SimEntity = {
   id: string;
-  position?: { x?: number; y?: number; z?: number };
-  rotation?: { x?: number; y?: number; z?: number };
+  position?: { x?: number; y?: number; z?: number } | [number, number, number];
+  rotation?: { x?: number; y?: number; z?: number } | [number, number, number];
 };
 
 type SimState = {
   entities?: Record<string, SimEntity>;
 };
-
-/**
- * Debug Simulation Canvas - Instanced approach
- *
- * - Uses InstancedMesh for performance (single draw call)
- * - Maps entity ids -> instance index once (stable)
- * - Updates instance matrices in useFrame (cheap, no React updates)
- */
 
 interface SimulationCanvasProps {
   simState?: SimState | null;
@@ -31,119 +21,110 @@ interface SimulationCanvasProps {
   cubeSize?: number;
 }
 
+/* ---------------- Scene Content (Instanced Cubes) ---------------- */
+
 function SceneContent({
   simState,
-  maxInstances = 1000,
-  cubeSize = 0.25,
+  maxInstances,
+  cubeSize,
 }: {
   simState?: SimState | null;
   maxInstances: number;
   cubeSize: number;
 }) {
-  // stable list of entity IDs (memoized) — rebuild only when entity set changes
   const ids = useMemo(() => {
-    if (!simState?.entities) return [] as string[];
+    if (!simState?.entities) return [];
     return Object.keys(simState.entities);
   }, [simState]);
 
-  // If nothing or too many, fallback UI handled by parent
-  const instanceCount = Math.min(ids.length, maxInstances);
+  const count = Math.min(ids.length, maxInstances);
 
-  // Map id -> index
   const idToIndex = useMemo(() => {
     const m = new Map<string, number>();
-    for (let i = 0; i < instanceCount; i++) {
-      m.set(ids[i], i);
-    }
+    for (let i = 0; i < count; i++) m.set(ids[i], i);
     return m;
-  }, [ids, instanceCount]);
+  }, [ids, count]);
 
-  // refs
-  const instRef = useRef<THREE.InstancedMesh | null>(null);
+  const instRef = useRef<THREE.InstancedMesh>(null);
 
-  // temp objects for matrix math
-  const tmpObj = useMemo(() => new THREE.Object3D(), []);
-  const tmpQuat = useMemo(() => new THREE.Quaternion(), []);
-  const tmpEuler = useMemo(() => new THREE.Euler(), []);
-  const tmpMat = useMemo(() => new THREE.Matrix4(), []);
+  const obj = useMemo(() => new THREE.Object3D(), []);
+  const euler = useMemo(() => new THREE.Euler(), []);
+  const quat = useMemo(() => new THREE.Quaternion(), []);
 
-  // Initialize instance matrices on mount (optional)
   useEffect(() => {
-    const inst = instRef.current;
-    if (!inst) return;
-    for (let i = 0; i < instanceCount; i++) {
-      tmpObj.position.set(0, 0, 0);
-      tmpObj.rotation.set(0, 0, 0);
-      tmpObj.scale.set(1, 1, 1);
-      tmpObj.updateMatrix();
-      inst.setMatrixAt(i, tmpObj.matrix);
+    if (!instRef.current) return;
+    for (let i = 0; i < count; i++) {
+      obj.position.set(0, 0, 0);
+      obj.rotation.set(0, 0, 0);
+      obj.scale.set(1, 1, 1);
+      obj.updateMatrix();
+      instRef.current.setMatrixAt(i, obj.matrix);
     }
-    inst.instanceMatrix.needsUpdate = true;
-  }, [instanceCount, tmpObj]);
+    instRef.current.instanceMatrix.needsUpdate = true;
+  }, [count, obj]);
 
-  // Update transforms every frame from simState via RAF
   useFrame(() => {
-    const inst = instRef.current;
-    if (!inst || !simState?.entities) return;
+    if (!instRef.current || !simState?.entities) return;
 
     let dirty = false;
+
     for (const [id, idx] of idToIndex.entries()) {
       const ent = simState.entities[id];
       if (!ent) continue;
 
-      const px = ent.position?.x ?? 0;
-      const py = ent.position?.y ?? 0;
-      const pz = ent.position?.z ?? 0;
+      const p = ent.position as any;
+      const r = ent.rotation as any;
 
-      const rx = ent.rotation?.x ?? 0;
-      const ry = ent.rotation?.y ?? 0;
-      const rz = ent.rotation?.z ?? 0;
+      const px = Array.isArray(p) ? p[0] : p?.x ?? 0;
+      const py = Array.isArray(p) ? p[1] : p?.y ?? 0;
+      const pz = Array.isArray(p) ? p[2] : p?.z ?? 0;
 
-      // set transform
-      tmpObj.position.set(px, py, pz);
-      tmpEuler.set(rx, ry, rz, "XYZ");
-      tmpQuat.setFromEuler(tmpEuler);
-      tmpObj.quaternion.copy(tmpQuat);
-      tmpObj.scale.set(cubeSize, cubeSize, cubeSize);
-      tmpObj.updateMatrix();
-      inst.setMatrixAt(idx, tmpObj.matrix);
+      const rx = Array.isArray(r) ? r[0] : r?.x ?? 0;
+      const ry = Array.isArray(r) ? r[1] : r?.y ?? 0;
+      const rz = Array.isArray(r) ? r[2] : r?.z ?? 0;
+
+      obj.position.set(px, py, pz);
+      euler.set(rx, ry, rz);
+      quat.setFromEuler(euler);
+      obj.quaternion.copy(quat);
+      obj.scale.set(cubeSize, cubeSize, cubeSize);
+      obj.updateMatrix();
+
+      instRef.current.setMatrixAt(idx, obj.matrix);
       dirty = true;
     }
 
-    if (dirty) {
-      inst.instanceMatrix.needsUpdate = true;
-    }
+    if (dirty) instRef.current.instanceMatrix.needsUpdate = true;
   });
 
-  // Material + geometry reused
   return (
-    <>
-      <instancedMesh
-        ref={instRef}
-        args={[undefined as any, undefined as any, instanceCount]}
-        castShadow
-        receiveShadow
-      >
-        <boxGeometry args={[cubeSize, cubeSize, cubeSize]} />
-        <meshStandardMaterial
-          transparent
-          opacity={0.9}
-          roughness={0.4}
-          metalness={0.1}
-        />
-      </instancedMesh>
-    </>
+    <instancedMesh
+      ref={instRef}
+      args={[undefined as any, undefined as any, count]}
+      castShadow
+      receiveShadow
+    >
+      <boxGeometry />
+      <meshStandardMaterial
+        color="#e5e7eb"
+        roughness={0.35}
+        metalness={0.15}
+      />
+    </instancedMesh>
   );
 }
+
+/* ---------------- Main Canvas ---------------- */
 
 export default function SimulationCanvas({
   simState = null,
   maxInstances = 1000,
-  cubeSize = 0.25,
+  cubeSize = 0.6,
 }: SimulationCanvasProps) {
-  const entityCount = simState?.entities ? Object.keys(simState.entities).length : 0;
+  const entityCount = simState?.entities
+    ? Object.keys(simState.entities).length
+    : 0;
 
-  // If no state -> placeholder
   if (!simState || entityCount === 0) {
     return (
       <div className="w-full h-full flex items-center justify-center text-slate-400">
@@ -152,31 +133,44 @@ export default function SimulationCanvas({
     );
   }
 
-  // If too many, show message instead of attempting to render everything
-  if (entityCount > maxInstances) {
-    return (
-      <div className="w-full h-full flex items-center justify-center text-slate-300">
-        Too many entities to render ({entityCount}). Increase maxInstances to view.
-      </div>
-    );
-  }
-
   return (
-    <div className="w-full h-full">
-      <Canvas camera={{ position: [4, 4, 4], fov: 55 }} shadows>
-        {/* Lights */}
-        <ambientLight intensity={0.45} />
-        <directionalLight castShadow position={[8, 10, 8]} intensity={0.9} />
+  <div className="w-full h-full">
+    <Canvas
+      shadows
+      camera={{ position: [3, 3, 3], fov: 45, near: 0.1, far: 50 }}
+    >
+      {/* 🌫 Scene depth */}
+      <fog attach="fog" args={["#0b1220", 4, 18]} />
 
-        {/* Grid */}
-        <gridHelper args={[20, 40, "#0ea5a4", "#0f172a"]} />
+      {/* 💡 Lighting */}
+      <ambientLight intensity={0.35} />
+      <directionalLight
+        position={[6, 8, 4]}
+        intensity={1.1}
+        castShadow
+        shadow-mapSize-width={1024}
+        shadow-mapSize-height={1024}
+      />
 
-        {/* Scene content: instanced debug cubes */}
-        <SceneContent simState={simState} maxInstances={maxInstances} cubeSize={cubeSize} />
+      {/* 🟫 Ground */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+        <planeGeometry args={[50, 50]} />
+        <meshStandardMaterial color="#0f172a" />
+      </mesh>
 
-        {/* Controls */}
-        <OrbitControls enableDamping dampingFactor={0.12} rotateSpeed={0.6} />
-      </Canvas>
-    </div>
-  );
+      {/* 📐 Grid */}
+      <gridHelper args={[20, 40, "#22d3ee", "#020617"]} />
+
+      {/* 🧊 Debug cubes */}
+      <SceneContent
+        simState={simState}
+        maxInstances={maxInstances}
+        cubeSize={cubeSize}
+      />
+
+      {/* 🎥 Controls */}
+      <OrbitControls enableDamping dampingFactor={0.12} />
+    </Canvas>
+  </div>
+);
 }

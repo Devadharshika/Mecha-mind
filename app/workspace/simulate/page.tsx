@@ -15,6 +15,7 @@ import {
   Terminal,
 } from "lucide-react";
 
+
 /* --- keep the robotModels / controlModes you already had --- */
 const robotModels = [
   { id: "arm6dof", label: "6-DOF Industrial Arm" },
@@ -33,6 +34,8 @@ const controlModes = [
 import { useAssembly } from "../../../store/assemblyStore"; // relative from app/workspace/simulate/page.tsx
 import { simService } from "../../../core/sim/simService";
 import { applySimToAssembly } from "../../../core/sim/sync";
+import SimulationShell from "./SimulationShell";
+
 
 /* --- Page component --- */
 export default function SimulateRobotsPage() {
@@ -149,29 +152,8 @@ export default function SimulateRobotsPage() {
 
           {/* Placeholder 3D canvas area */}
           <div className="relative h-[360px] md:h-[420px] lg:h-[460px]">
-            <div className="absolute inset-0">
-              {/* Background grid / pattern */}
-              <div className="w-full h-full bg-[radial-gradient(circle_at_top,_rgba(45,212,191,0.05),_transparent_60%),radial-gradient(circle_at_bottom,_rgba(56,189,248,0.08),_transparent_60%)]" />
-              <div className="pointer-events-none absolute inset-4 rounded-[1.5rem] border border-cyan-400/10 [mask-image:radial-gradient(circle_at_center,black,transparent_70%)]" />
-              <div className="pointer-events-none absolute inset-[18%] border border-slate-700/70 rounded-[1.25rem] bg-slate-950/40 backdrop-blur-sm" />
-              <div className="pointer-events-none absolute inset-[22%] rounded-[1rem] border border-slate-800/70 border-dashed" />
-            </div>
-
-            <div className="relative z-10 w-full h-full flex items-center justify-center flex-col gap-4 px-4 text-center">
-              <div className="inline-flex items-center justify-center rounded-full border border-cyan-400/30 bg-cyan-400/5 px-3 py-1 text-[10px] md:text-xs text-cyan-200 mb-1">
-                r3f / Three.js slot — ready for integration
-              </div>
-              <p className="text-base md:text-lg font-medium text-slate-50 flex items-center gap-2">
-                3D Robot Simulation Canvas
-              </p>
-              <p className="max-w-xl text-xs md:text-sm text-slate-400">
-                This panel will render your interactive 3D robot models with full physics,
-                joint manipulation, and real-time sensor overlays. You can plug your
-                <span className="text-cyan-300"> react-three-fiber </span>
-                scene directly here.
-              </p>
-            </div>
-
+            <SimulationShell />
+            
             {/* Corner HUD badges */}
             <div className="pointer-events-none absolute left-4 bottom-4 flex flex-col gap-2 text-[10px] md:text-xs">
               <div className="inline-flex items-center gap-2 rounded-full bg-slate-900/80 border border-slate-700/80 px-3 py-1">
@@ -469,4 +451,4 @@ export default function SimulateRobotsPage() {
       </div>
     </div>
   );
-}
+} 
