@@ -1,14 +1,22 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef } from "react";
-import { Canvas, useFrame } from "@react-three/fiber";
-import { OrbitControls } from "@react-three/drei";
+import { Canvas, useThree, useFrame } from "@react-three/fiber";
+import { OrbitControls, Grid } from "@react-three/drei";
 import * as THREE from "three";
+import { Physics, RigidBody } from "@react-three/rapier";
+
+import PhysicsGround from "./physics/PhysicsGround";
+// import PhysicsTestCube from "./physics/PhysicsTestCube"; // Phase C-1 (COMMENTED)
+
+/* -----------------------------------------
+   Types
+----------------------------------------- */
 
 type SimEntity = {
   id: string;
-  position?: { x?: number; y?: number; z?: number } | [number, number, number];
-  rotation?: { x?: number; y?: number; z?: number } | [number, number, number];
+  position?: { x?: number; y?: number; z?: number };
+  rotation?: { x?: number; y?: number; z?: number };
 };
 
 type SimState = {
@@ -21,9 +29,53 @@ interface SimulationCanvasProps {
   cubeSize?: number;
 }
 
-/* ---------------- Scene Content (Instanced Cubes) ---------------- */
+/* -----------------------------------------
+   SceneContent — Phase C-2 (ACTIVE)
+   One RigidBody per entity
+----------------------------------------- */
 
 function SceneContent({
+  simState,
+  cubeSize,
+}: {
+  simState?: SimState | null;
+  cubeSize: number;
+}) {
+  if (!simState?.entities) return null;
+
+  return (
+    <>
+      {Object.values(simState.entities).map((ent) => (
+        <RigidBody
+          key={ent.id}
+          colliders="cuboid"
+          position={[
+            ent.position?.x ?? 0,
+            (ent.position?.y ?? 0) + 2, // lift to avoid ground overlap
+            ent.position?.z ?? 0,
+          ]}
+          rotation={[
+            ent.rotation?.x ?? 0,
+            ent.rotation?.y ?? 0,
+            ent.rotation?.z ?? 0,
+          ]}
+        >
+          <mesh castShadow>
+            <boxGeometry args={[cubeSize, cubeSize, cubeSize]} />
+            <meshStandardMaterial color="#55ccff" />
+          </mesh>
+        </RigidBody>
+      ))}
+    </>
+  );
+}
+
+/* -----------------------------------------
+   SceneContent — Phase B (INSTANCED, COMMENTED)
+   Preserved for later optimization
+----------------------------------------- */
+/*
+function SceneContent_Instanced({
   simState,
   maxInstances,
   cubeSize,
@@ -32,94 +84,96 @@ function SceneContent({
   maxInstances: number;
   cubeSize: number;
 }) {
-  const ids = useMemo(() => {
-    if (!simState?.entities) return [];
-    return Object.keys(simState.entities);
-  }, [simState]);
+  const ids = useMemo(
+    () => (simState?.entities ? Object.keys(simState.entities) : []),
+    [simState]
+  );
 
   const count = Math.min(ids.length, maxInstances);
-
-  const idToIndex = useMemo(() => {
-    const m = new Map<string, number>();
-    for (let i = 0; i < count; i++) m.set(ids[i], i);
-    return m;
-  }, [ids, count]);
-
-  const instRef = useRef<THREE.InstancedMesh>(null);
-
-  const obj = useMemo(() => new THREE.Object3D(), []);
-  const euler = useMemo(() => new THREE.Euler(), []);
-  const quat = useMemo(() => new THREE.Quaternion(), []);
-
-  useEffect(() => {
-    if (!instRef.current) return;
-    for (let i = 0; i < count; i++) {
-      obj.position.set(0, 0, 0);
-      obj.rotation.set(0, 0, 0);
-      obj.scale.set(1, 1, 1);
-      obj.updateMatrix();
-      instRef.current.setMatrixAt(i, obj.matrix);
-    }
-    instRef.current.instanceMatrix.needsUpdate = true;
-  }, [count, obj]);
+  const meshRef = useRef<THREE.InstancedMesh>(null);
+  const tmp = useMemo(() => new THREE.Object3D(), []);
 
   useFrame(() => {
-    if (!instRef.current || !simState?.entities) return;
+    if (!meshRef.current || !simState?.entities) return;
 
-    let dirty = false;
-
-    for (const [id, idx] of idToIndex.entries()) {
-      const ent = simState.entities[id];
+    for (let i = 0; i < count; i++) {
+      const ent = simState.entities[ids[i]];
       if (!ent) continue;
 
-      const p = ent.position as any;
-      const r = ent.rotation as any;
+      tmp.position.set(
+        ent.position?.x ?? 0,
+        ent.position?.y ?? 0,
+        ent.position?.z ?? 0
+      );
 
-      const px = Array.isArray(p) ? p[0] : p?.x ?? 0;
-      const py = Array.isArray(p) ? p[1] : p?.y ?? 0;
-      const pz = Array.isArray(p) ? p[2] : p?.z ?? 0;
+      tmp.rotation.set(
+        ent.rotation?.x ?? 0,
+        ent.rotation?.y ?? 0,
+        ent.rotation?.z ?? 0
+      );
 
-      const rx = Array.isArray(r) ? r[0] : r?.x ?? 0;
-      const ry = Array.isArray(r) ? r[1] : r?.y ?? 0;
-      const rz = Array.isArray(r) ? r[2] : r?.z ?? 0;
-
-      obj.position.set(px, py, pz);
-      euler.set(rx, ry, rz);
-      quat.setFromEuler(euler);
-      obj.quaternion.copy(quat);
-      obj.scale.set(cubeSize, cubeSize, cubeSize);
-      obj.updateMatrix();
-
-      instRef.current.setMatrixAt(idx, obj.matrix);
-      dirty = true;
+      tmp.scale.setScalar(cubeSize);
+      tmp.updateMatrix();
+      meshRef.current.setMatrixAt(i, tmp.matrix);
     }
 
-    if (dirty) instRef.current.instanceMatrix.needsUpdate = true;
+    meshRef.current.instanceMatrix.needsUpdate = true;
   });
 
   return (
-    <instancedMesh
-      ref={instRef}
-      args={[undefined as any, undefined as any, count]}
-      castShadow
-      receiveShadow
-    >
-      <boxGeometry />
-      <meshStandardMaterial
-        color="#e5e7eb"
-        roughness={0.35}
-        metalness={0.15}
-      />
+    <instancedMesh ref={meshRef} args={[undefined as any, undefined as any, count]}>
+      <boxGeometry args={[1, 1, 1]} />
+      <meshStandardMaterial color="#55ccff" />
     </instancedMesh>
   );
 }
+*/
 
-/* ---------------- Main Canvas ---------------- */
+/* -----------------------------------------
+   Camera + Controls (LOCKED)
+----------------------------------------- */
+
+function CameraRig() {
+  const { camera, gl } = useThree();
+  const controls = useRef<any>(null);
+
+  useEffect(() => {
+    camera.up.set(0, 1, 0);
+    camera.position.set(6, 6, 6);
+    camera.lookAt(0, 0, 0);
+    camera.updateProjectionMatrix();
+
+    if (controls.current) {
+      controls.current.target.set(0, 0, 0);
+      controls.current.update();
+    }
+
+    gl.setClearColor("#0b0f19");
+  }, [camera, gl]);
+
+  return (
+    <OrbitControls
+      ref={controls}
+      enableDamping
+      dampingFactor={0.08}
+      rotateSpeed={0.6}
+      zoomSpeed={1.0}
+      panSpeed={0.6}
+      minDistance={2}
+      maxDistance={60}
+      maxPolarAngle={Math.PI * 0.495}
+    />
+  );
+}
+
+/* -----------------------------------------
+   Main Canvas
+----------------------------------------- */
 
 export default function SimulationCanvas({
   simState = null,
   maxInstances = 1000,
-  cubeSize = 0.6,
+  cubeSize = 0.5,
 }: SimulationCanvasProps) {
   const entityCount = simState?.entities
     ? Object.keys(simState.entities).length
@@ -128,49 +182,47 @@ export default function SimulationCanvas({
   if (!simState || entityCount === 0) {
     return (
       <div className="w-full h-full flex items-center justify-center text-slate-400">
-        No simulation entities to display
+        No simulation entities
       </div>
     );
   }
 
   return (
-  <div className="w-full h-full">
-    <Canvas
-      shadows
-      camera={{ position: [3, 3, 3], fov: 45, near: 0.1, far: 50 }}
-    >
-      {/* 🌫 Scene depth */}
-      <fog attach="fog" args={["#0b1220", 4, 18]} />
+    <div className="w-full h-full">
+      <Canvas
+        shadows
+        frameloop="always"
+        camera={{ fov: 55, near: 0.1, far: 500 }}
+      >
+        <Physics gravity={[0, -9.81, 0]}>
+          {/* Atmosphere */}
+          <color attach="background" args={["#0b0f19"]} />
+          <fog attach="fog" args={["#0b0f19", 10, 80]} />
 
-      {/* 💡 Lighting */}
-      <ambientLight intensity={0.35} />
-      <directionalLight
-        position={[6, 8, 4]}
-        intensity={1.1}
-        castShadow
-        shadow-mapSize-width={1024}
-        shadow-mapSize-height={1024}
-      />
+          {/* Lights */}
+          <ambientLight intensity={0.3} />
+          <directionalLight position={[8, 12, 6]} intensity={1.1} castShadow />
+          <directionalLight position={[-6, 4, -4]} intensity={0.5} color="#55ccff" />
 
-      {/* 🟫 Ground */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
-        <planeGeometry args={[50, 50]} />
-        <meshStandardMaterial color="#0f172a" />
-      </mesh>
+          {/* Phase C-1 Ground (ACTIVE) */}
+          <PhysicsGround />
 
-      {/* 📐 Grid */}
-      <gridHelper args={[20, 40, "#22d3ee", "#020617"]} />
+          {/* Phase C-1 Test Cube (COMMENTED) */}
+          {/*
+          <PhysicsTestCube />
+          */}
 
-      {/* 🧊 Debug cubes */}
-      <SceneContent
-        simState={simState}
-        maxInstances={maxInstances}
-        cubeSize={cubeSize}
-      />
+          {/* Helpers */}
+          <Grid infiniteGrid />
+          <axesHelper args={[2]} />
 
-      {/* 🎥 Controls */}
-      <OrbitControls enableDamping dampingFactor={0.12} />
-    </Canvas>
-  </div>
-);
+          {/* Phase C-2 Entities (ACTIVE) */}
+          <SceneContent simState={simState} cubeSize={cubeSize} />
+
+          {/* Camera */}
+          <CameraRig />
+        </Physics>
+      </Canvas>
+    </div>
+  );
 }

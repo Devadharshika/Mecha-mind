@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { simService } from "../../../core/sim/simService";
-import { applySimToAssembly } from "../../../core/sim/sync";
-import { useAssembly } from "../../../store/assemblyStore";
+import { simService } from "@/core/sim/simService";
+import { applySimToAssembly } from "@/core/sim/sync";
+import { useAssembly } from "@/store/assemblyStore";
 import SimulationCanvas from "./SimulationCanvas";
 
 interface SimulationShellProps {
@@ -13,8 +13,8 @@ interface SimulationShellProps {
 export default function SimulationShell({ children }: SimulationShellProps) {
   const { state: assemblyState, dispatch } = useAssembly();
 
-  // single source of truth for render
-  const [simState, setSimState] = useState<any>(() => simService.state ?? {});
+  // Render state (read-only mirror of simService.state)
+  const [simState, setSimState] = useState<any>(() => simService.state);
   const [entityCount, setEntityCount] = useState<number>(0);
   const [running, setRunning] = useState<boolean>(false);
 
@@ -22,13 +22,13 @@ export default function SimulationShell({ children }: SimulationShellProps) {
   const initializedRef = useRef(false);
 
   /* ---------------------------------------
-     INITIALIZE + SUBSCRIBE (ONCE)
+     INITIALIZE + SUBSCRIBE (ONCE ONLY)
   --------------------------------------- */
   useEffect(() => {
     if (initializedRef.current) return;
     initializedRef.current = true;
 
-    // subscribe FIRST (important)
+    // Subscribe FIRST
     const unsub = simService.subscribe((s: any) => {
       setSimState(s);
       setEntityCount(Object.keys(s.entities ?? {}).length);
@@ -36,7 +36,7 @@ export default function SimulationShell({ children }: SimulationShellProps) {
     });
     unsubRef.current = unsub;
 
-    // then create snapshot
+    // Create initial snapshot ONCE
     try {
       simService.createSnapshotFromAssembly(assemblyState);
     } catch (e) {
@@ -51,17 +51,10 @@ export default function SimulationShell({ children }: SimulationShellProps) {
   }, []);
 
   /* ---------------------------------------
-     REBUILD SNAPSHOT WHEN ASSEMBLY CHANGES
-  --------------------------------------- */
-  useEffect(() => {
-    if (!initializedRef.current) return;
-    simService.reset(true);
-  }, [assemblyState]);
-
-  /* ---------------------------------------
-     CONTROLS
+     CONTROLS (NO AUTO MUTATION)
   --------------------------------------- */
   function onStart() {
+    console.log("UI START CLICKED");
     simService.start();
   }
 
@@ -75,6 +68,7 @@ export default function SimulationShell({ children }: SimulationShellProps) {
 
   function onReset() {
     simService.reset(true);
+    simService.createSnapshotFromAssembly(assemblyState);
   }
 
   function onApply() {
@@ -86,7 +80,7 @@ export default function SimulationShell({ children }: SimulationShellProps) {
   --------------------------------------- */
   return (
     <div className="w-full h-full flex flex-col">
-      {/* Debug control strip (Phase C only) */}
+      {/* Debug control strip (Phase C) */}
       <div className="p-2 bg-slate-900 border-b border-slate-800 text-slate-300 text-xs flex items-center gap-4">
         <span>Entities: {entityCount}</span>
 

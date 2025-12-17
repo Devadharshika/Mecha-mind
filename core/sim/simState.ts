@@ -1,4 +1,5 @@
 // core/sim/simState.ts
+
 export type SimTime = number;
 
 export type SimVec3 = {
@@ -10,9 +11,15 @@ export type SimVec3 = {
 export type SimEntity = {
   id: string;
   type?: string;
+
+  // Transforms
   position: SimVec3;
   rotation: SimVec3;
-  mass?: number;
+
+  // 🔑 Physics state (REQUIRED from Phase C-3 onward)
+  velocity: SimVec3;
+  mass: number;
+
   meta?: {
     name?: string;
     category?: string;
@@ -20,7 +27,6 @@ export type SimEntity = {
     dimensions?: any;
   };
 };
-
 
 export type SimJoint = {
   id: string;
@@ -40,7 +46,9 @@ export type SimState = {
   gravity: [number, number, number];
 };
 
-export const createEmptyState = (opts?: Partial<Pick<SimState, "gravity">>): SimState => ({
+export const createEmptyState = (
+  opts?: Partial<Pick<SimState, "gravity">>
+): SimState => ({
   time: 0,
   running: false,
   entities: {},

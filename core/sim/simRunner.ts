@@ -65,6 +65,7 @@ export class SimRunner {
   }
 
   private _step(dt: number) {
+    console.log("SIM STEP", dt);
     this.state.time += dt;
     if (this.onStep) this.onStep(dt, this.state);
   }
