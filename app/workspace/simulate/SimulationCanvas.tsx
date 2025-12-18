@@ -1,16 +1,21 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef } from "react";
-import { Canvas, useThree, useFrame } from "@react-three/fiber";
+import React, { useEffect, useRef } from "react";
+import { Canvas, useThree } from "@react-three/fiber";
 import { OrbitControls, Grid } from "@react-three/drei";
 import * as THREE from "three";
-import { Physics, RigidBody } from "@react-three/rapier";
+
+import {
+  Physics,
+  RigidBody,
+  useRevoluteJoint,
+} from "@react-three/rapier";
 
 import PhysicsGround from "./physics/PhysicsGround";
 // import PhysicsTestCube from "./physics/PhysicsTestCube"; // Phase C-1 (COMMENTED)
 
 /* -----------------------------------------
-   Types
+   Types (USED LATER — DO NOT REMOVE)
 ----------------------------------------- */
 
 type SimEntity = {
@@ -30,10 +35,10 @@ interface SimulationCanvasProps {
 }
 
 /* -----------------------------------------
-   SceneContent — Phase C-2 (ACTIVE)
-   One RigidBody per entity
+   Phase C-2 — SceneContent (COMMENTED)
+   Restore AFTER C-3
 ----------------------------------------- */
-
+/*
 function SceneContent({
   simState,
   cubeSize,
@@ -51,7 +56,7 @@ function SceneContent({
           colliders="cuboid"
           position={[
             ent.position?.x ?? 0,
-            (ent.position?.y ?? 0) + 2, // lift to avoid ground overlap
+            (ent.position?.y ?? 0) + 2,
             ent.position?.z ?? 0,
           ]}
           rotation={[
@@ -69,65 +74,48 @@ function SceneContent({
     </>
   );
 }
+*/
 
 /* -----------------------------------------
-   SceneContent — Phase B (INSTANCED, COMMENTED)
-   Preserved for later optimization
+   Phase C-3 — Joint Sanity Test (ACTIVE)
+   Two bodies + one revolute joint
 ----------------------------------------- */
-/*
-function SceneContent_Instanced({
-  simState,
-  maxInstances,
-  cubeSize,
-}: {
-  simState?: SimState | null;
-  maxInstances: number;
-  cubeSize: number;
-}) {
-  const ids = useMemo(
-    () => (simState?.entities ? Object.keys(simState.entities) : []),
-    [simState]
-  );
 
-  const count = Math.min(ids.length, maxInstances);
-  const meshRef = useRef<THREE.InstancedMesh>(null);
-  const tmp = useMemo(() => new THREE.Object3D(), []);
+function JointSanityTest() {
+  const baseRef = useRef(null);
+  const armRef = useRef(null);
 
-  useFrame(() => {
-    if (!meshRef.current || !simState?.entities) return;
+  // ✅ Correct API for @react-three/rapier
+  useRevoluteJoint(baseRef, armRef, [
+  [0, 0.5, 0],
+  [0, -0.6, 0],
+  [0, 0, 1],
+], {
+  limits: [-Math.PI / 4, Math.PI / 4],
+});
 
-    for (let i = 0; i < count; i++) {
-      const ent = simState.entities[ids[i]];
-      if (!ent) continue;
-
-      tmp.position.set(
-        ent.position?.x ?? 0,
-        ent.position?.y ?? 0,
-        ent.position?.z ?? 0
-      );
-
-      tmp.rotation.set(
-        ent.rotation?.x ?? 0,
-        ent.rotation?.y ?? 0,
-        ent.rotation?.z ?? 0
-      );
-
-      tmp.scale.setScalar(cubeSize);
-      tmp.updateMatrix();
-      meshRef.current.setMatrixAt(i, tmp.matrix);
-    }
-
-    meshRef.current.instanceMatrix.needsUpdate = true;
-  });
 
   return (
-    <instancedMesh ref={meshRef} args={[undefined as any, undefined as any, count]}>
-      <boxGeometry args={[1, 1, 1]} />
-      <meshStandardMaterial color="#55ccff" />
-    </instancedMesh>
+    <>
+      {/* Fixed base */}
+      <RigidBody ref={baseRef} type="fixed" position={[0, 2, 0]}>
+        <mesh castShadow>
+          <boxGeometry args={[1, 1, 1]} />
+          <meshStandardMaterial color="#64748b" />
+        </mesh>
+      </RigidBody>
+
+      {/* Arm */}
+      <RigidBody ref={armRef} position={[0.05, 3.2, 0]} canSleep={false}>
+        <mesh castShadow>
+          <boxGeometry args={[0.4, 2, 0.4]} />
+          <meshStandardMaterial color="#22d3ee" />
+        </mesh>
+      </RigidBody>
+    </>
   );
 }
-*/
+
 
 /* -----------------------------------------
    Camera + Controls (LOCKED)
@@ -143,10 +131,8 @@ function CameraRig() {
     camera.lookAt(0, 0, 0);
     camera.updateProjectionMatrix();
 
-    if (controls.current) {
-      controls.current.target.set(0, 0, 0);
-      controls.current.update();
-    }
+    controls.current?.target.set(0, 0, 0);
+    controls.current?.update();
 
     gl.setClearColor("#0b0f19");
   }, [camera, gl]);
@@ -175,25 +161,9 @@ export default function SimulationCanvas({
   maxInstances = 1000,
   cubeSize = 0.5,
 }: SimulationCanvasProps) {
-  const entityCount = simState?.entities
-    ? Object.keys(simState.entities).length
-    : 0;
-
-  if (!simState || entityCount === 0) {
-    return (
-      <div className="w-full h-full flex items-center justify-center text-slate-400">
-        No simulation entities
-      </div>
-    );
-  }
-
   return (
     <div className="w-full h-full">
-      <Canvas
-        shadows
-        frameloop="always"
-        camera={{ fov: 55, near: 0.1, far: 500 }}
-      >
+      <Canvas shadows camera={{ fov: 55, near: 0.1, far: 500 }}>
         <Physics gravity={[0, -9.81, 0]}>
           {/* Atmosphere */}
           <color attach="background" args={["#0b0f19"]} />
@@ -204,22 +174,21 @@ export default function SimulationCanvas({
           <directionalLight position={[8, 12, 6]} intensity={1.1} castShadow />
           <directionalLight position={[-6, 4, -4]} intensity={0.5} color="#55ccff" />
 
-          {/* Phase C-1 Ground (ACTIVE) */}
+          {/* Ground */}
           <PhysicsGround />
-
-          {/* Phase C-1 Test Cube (COMMENTED) */}
-          {/*
-          <PhysicsTestCube />
-          */}
 
           {/* Helpers */}
           <Grid infiniteGrid />
           <axesHelper args={[2]} />
 
-          {/* Phase C-2 Entities (ACTIVE) */}
-          <SceneContent simState={simState} cubeSize={cubeSize} />
+          {/* Phase C-3 Joint Test */}
+          <JointSanityTest />
 
-          {/* Camera */}
+          {/* Phase C-2 Restore later */}
+          {/*
+          <SceneContent simState={simState} cubeSize={cubeSize} />
+          */}
+
           <CameraRig />
         </Physics>
       </Canvas>
