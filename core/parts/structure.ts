@@ -45,6 +45,44 @@ export const STRUCTURE_PARTS: MMPart[] = [
     dof: null,
     jointLimitsRad: null,
     compatibleRobots: ["humanoid"],
-    description: "Lightweight torso frame for mid-size humanoid robots with modular mount points.",
+    description:
+      "Lightweight torso frame for mid-size humanoid robots with modular mount points.",
+  },
+
+  // ------------------------------------------------------------------
+  // Generic Base Link (safe root for any robot assembly)
+  // ------------------------------------------------------------------
+  {
+    id: "mm-str-base-link",
+    name: "Base Link",
+    code: "STR-BASE-LINK",
+    category: "structure",
+    subtype: "base-link",
+    tier: "standard",
+    massKg: 5.0,
+    sizeM: { x: 0.3, y: 0.1, z: 0.3 },
+
+    maxTorqueNm: null,
+    maxSpeedRpm: null,
+    maxThrustN: null,
+    voltageV: null,
+    maxCurrentA: null,
+    powerW: null,
+    rangeM: null,
+    updateRateHz: null,
+
+    dof: null,
+    jointLimitsRad: null,
+
+    compatibleRobots: [
+      "generic",
+      "drone",
+      "humanoid",
+      "rover",
+      "manipulator",
+      "exosuit",
+    ],
+    description:
+      "Generic base structural link used as the root body for robot assemblies.",
   },
 ];

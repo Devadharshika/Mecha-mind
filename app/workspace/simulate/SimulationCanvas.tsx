@@ -3,16 +3,15 @@
 import React, { useEffect, useRef } from "react";
 import { Canvas, useThree } from "@react-three/fiber";
 import { OrbitControls, Grid } from "@react-three/drei";
-import * as THREE from "three";
-
 import {
   Physics,
   RigidBody,
-  useRevoluteJoint,
+  type RigidBodyApi,
 } from "@react-three/rapier";
 
 import PhysicsGround from "./physics/PhysicsGround";
-// import PhysicsTestCube from "./physics/PhysicsTestCube"; // Phase C-1 (COMMENTED)
+import { FixedJointConstraint } from "@/core/sim/joints/fixedJoint";
+import { createBodyRegistry } from "@/core/sim/joints/bodyRegistry";
 
 /* -----------------------------------------
    Types (USED LATER — DO NOT REMOVE)
@@ -25,97 +24,14 @@ type SimEntity = {
 };
 
 type SimState = {
+  resetId: number;
   entities?: Record<string, SimEntity>;
 };
 
 interface SimulationCanvasProps {
   simState?: SimState | null;
-  maxInstances?: number;
-  cubeSize?: number;
+  running: boolean;
 }
-
-/* -----------------------------------------
-   Phase C-2 — SceneContent (COMMENTED)
-   Restore AFTER C-3
------------------------------------------ */
-/*
-function SceneContent({
-  simState,
-  cubeSize,
-}: {
-  simState?: SimState | null;
-  cubeSize: number;
-}) {
-  if (!simState?.entities) return null;
-
-  return (
-    <>
-      {Object.values(simState.entities).map((ent) => (
-        <RigidBody
-          key={ent.id}
-          colliders="cuboid"
-          position={[
-            ent.position?.x ?? 0,
-            (ent.position?.y ?? 0) + 2,
-            ent.position?.z ?? 0,
-          ]}
-          rotation={[
-            ent.rotation?.x ?? 0,
-            ent.rotation?.y ?? 0,
-            ent.rotation?.z ?? 0,
-          ]}
-        >
-          <mesh castShadow>
-            <boxGeometry args={[cubeSize, cubeSize, cubeSize]} />
-            <meshStandardMaterial color="#55ccff" />
-          </mesh>
-        </RigidBody>
-      ))}
-    </>
-  );
-}
-*/
-
-/* -----------------------------------------
-   Phase C-3 — Joint Sanity Test (ACTIVE)
-   Two bodies + one revolute joint
------------------------------------------ */
-
-function JointSanityTest() {
-  const baseRef = useRef(null);
-  const armRef = useRef(null);
-
-  // ✅ Correct API for @react-three/rapier
-  useRevoluteJoint(baseRef, armRef, [
-  [0, 0.5, 0],
-  [0, -0.6, 0],
-  [0, 0, 1],
-], {
-  limits: [-Math.PI / 4, Math.PI / 4],
-});
-
-
-  return (
-    <>
-      {/* Fixed base */}
-      <RigidBody ref={baseRef} type="fixed" position={[0, 2, 0]}>
-        <mesh castShadow>
-          <boxGeometry args={[1, 1, 1]} />
-          <meshStandardMaterial color="#64748b" />
-        </mesh>
-      </RigidBody>
-
-      {/* Arm */}
-      <RigidBody ref={armRef} position={[0.05, 3.2, 0]} canSleep={false}>
-        <mesh castShadow>
-          <boxGeometry args={[0.4, 2, 0.4]} />
-          <meshStandardMaterial color="#22d3ee" />
-        </mesh>
-      </RigidBody>
-    </>
-  );
-}
-
 
 /* -----------------------------------------
    Camera + Controls (LOCKED)
@@ -153,44 +69,81 @@ function CameraRig() {
 }
 
 /* -----------------------------------------
-   Main Canvas
+   MAIN CANVAS — PHASE D-3.2
 ----------------------------------------- */
 
 export default function SimulationCanvas({
   simState = null,
-  maxInstances = 1000,
-  cubeSize = 0.5,
+  running,
 }: SimulationCanvasProps) {
+  // Registry survives renders
+  const bodyRegistry = useRef(createBodyRegistry());
+
   return (
     <div className="w-full h-full">
       <Canvas shadows camera={{ fov: 55, near: 0.1, far: 500 }}>
-        <Physics gravity={[0, -9.81, 0]}>
-          {/* Atmosphere */}
-          <color attach="background" args={["#0b0f19"]} />
-          <fog attach="fog" args={["#0b0f19", 10, 80]} />
+        <color attach="background" args={["#0b0f19"]} />
+        <fog attach="fog" args={["#0b0f19", 10, 80]} />
 
-          {/* Lights */}
-          <ambientLight intensity={0.3} />
-          <directionalLight position={[8, 12, 6]} intensity={1.1} castShadow />
-          <directionalLight position={[-6, 4, -4]} intensity={0.5} color="#55ccff" />
+        <ambientLight intensity={0.3} />
+        <directionalLight position={[8, 12, 6]} intensity={1.1} castShadow />
+        <directionalLight
+          position={[-6, 4, -4]}
+          intensity={0.5}
+          color="#55ccff"
+        />
 
-          {/* Ground */}
+        <Physics
+          key={simState?.resetId}
+          gravity={[0, -9.81, 0]}
+          paused={!running}
+        >
           <PhysicsGround />
 
-          {/* Helpers */}
-          <Grid infiniteGrid />
-          <axesHelper args={[2]} />
+          {/* Body A */}
+          <RigidBody
+            ref={(api: RigidBodyApi | null) => {
+              if (api) bodyRegistry.current.set("bodyA", api);
+            }}
+            colliders="cuboid"
+            position={[0, 4, 0]}
+          >
+            <mesh castShadow>
+              <boxGeometry args={[1, 1, 1]} />
+              <meshStandardMaterial color="#22d3ee" />
+            </mesh>
+          </RigidBody>
 
-          {/* Phase C-3 Joint Test */}
-          <JointSanityTest />
+          {/* Body B */}
+          <RigidBody
+            ref={(api: RigidBodyApi | null) => {
+              if (api) bodyRegistry.current.set("bodyB", api);
+            }}
+            colliders="cuboid"
+            position={[0, 5.2, 0]}
+          >
+            <mesh castShadow>
+              <boxGeometry args={[1, 1, 1]} />
+              <meshStandardMaterial color="#0ea5e9" />
+            </mesh>
+          </RigidBody>
 
-          {/* Phase C-2 Restore later */}
-          {/*
-          <SceneContent simState={simState} cubeSize={cubeSize} />
-          */}
-
-          <CameraRig />
+          {/* Fixed Joint */}
+          <FixedJointConstraint
+            joint={{
+              id: "test-fixed",
+              type: "fixed",
+              parentId: "bodyA",
+              childId: "bodyB",
+            }}
+            bodyA={bodyRegistry.current.get("bodyA")}
+            bodyB={bodyRegistry.current.get("bodyB")}
+          />
         </Physics>
+
+        <Grid infiniteGrid />
+        <axesHelper args={[2]} />
+        <CameraRig />
       </Canvas>
     </div>
   );

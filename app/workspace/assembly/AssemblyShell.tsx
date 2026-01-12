@@ -7,6 +7,7 @@ import { AssemblyTree } from "./components/AssemblyTree";
 import { PropertiesPanel } from "./components/PropertiesPanel";
 import { ValidationPanel } from "./components/ValidationPanel";
 import { RobotCanvas } from "./components/RobotCanvas";
+import JointDebugOverlay from "./components/JointDebugOverlay";
 
 export default function AssemblyShell() {
   return (
@@ -25,7 +26,12 @@ export default function AssemblyShell() {
           {/* Center: Tree + Canvas */}
           <div className="flex-1 flex flex-col gap-3">
             <AssemblyTree />
-            <RobotCanvas />
+
+            {/* Canvas container (relative for debug overlays) */}
+            <div className="relative flex-1">
+              <RobotCanvas />
+              <JointDebugOverlay />
+            </div>
           </div>
 
           {/* Right: Properties */}

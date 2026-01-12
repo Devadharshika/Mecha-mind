@@ -26,20 +26,62 @@ export interface PartRef {
   id: string; // part id from the library
 }
 
-// Single node in the assembly tree
 export interface AssemblyNode {
   id: string;
   name: string;
-  partId: string | null; // null for root / empty nodes
+  partId: string | null;
   category: PartCategory | "root";
   parentId: string | null;
-  children: string[]; // child node ids
+  children: string[];
+
+  // optional transform used by simulation and editor
+  transform?: {
+    pos: [number, number, number];
+    rot?: [number, number, number]; // Euler XYZ in radians
+  };
+}
+
+/* =========================================================
+   Assembly Joints — DESIGN-TIME ONLY
+   (No physics, no simulation, no execution)
+   ========================================================= */
+
+export type JointType =
+  | "fixed"
+  | "revolute"
+  | "prismatic";
+
+export interface AssemblyJoint {
+  id: string;
+
+  // relationship
+  parentId: string; // parent AssemblyNode id
+  childId: string;  // child AssemblyNode id
+
+  // joint semantics
+  type: JointType;
+
+  // axis definition (local to parent frame)
+  // required for revolute / prismatic joints
+  axis?: [number, number, number];
+
+  // optional joint limits (radians or meters)
+  limits?: {
+    min: number;
+    max: number;
+  };
 }
 
 // State shape for the assembly workspace
 export interface AssemblyState {
   robotType: RobotType;
   rootId: string;
+
+  // structural graph
   nodes: Record<string, AssemblyNode>;
+
+  // 🔑 NEW — design-time joint storage
+  joints: Record<string, AssemblyJoint>;
+
   selectedNodeId: string | null;
 }

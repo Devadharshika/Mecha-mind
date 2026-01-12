@@ -1,31 +1,13 @@
 // core/sim/simState.ts
-
 export type SimTime = number;
 
-export type SimVec3 = {
-  x: number;
-  y: number;
-  z: number;
-};
-
 export type SimEntity = {
-  id: string;
-  type?: string;
-
-  // Transforms
-  position: SimVec3;
-  rotation: SimVec3;
-
-  // 🔑 Physics state (REQUIRED from Phase C-3 onward)
-  velocity: SimVec3;
-  mass: number;
-
-  meta?: {
-    name?: string;
-    category?: string;
-    parentId?: string | null;
-    dimensions?: any;
-  };
+  id: string; // maps to AssemblyNode.id
+  type: "part" | "joint" | "sensor";
+  position: [number, number, number];
+  rotation: [number, number, number]; // Euler XYZ (radians)
+  mass?: number;
+  meta?: Record<string, any>;
 };
 
 export type SimJoint = {
@@ -39,6 +21,7 @@ export type SimJoint = {
 };
 
 export type SimState = {
+  resetId: number;
   time: SimTime;
   running: boolean;
   entities: Record<string, SimEntity>;
@@ -46,9 +29,7 @@ export type SimState = {
   gravity: [number, number, number];
 };
 
-export const createEmptyState = (
-  opts?: Partial<Pick<SimState, "gravity">>
-): SimState => ({
+export const createEmptyState = (opts?: Partial<Pick<SimState, "gravity">>): SimState => ({
   time: 0,
   running: false,
   entities: {},
