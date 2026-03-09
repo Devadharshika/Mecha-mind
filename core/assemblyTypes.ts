@@ -85,3 +85,22 @@ export interface AssemblyState {
 
   selectedNodeId: string | null;
 }
+// State shape for the assembly workspace
+export interface AssemblyState {
+  robotType: RobotType;
+  rootId: string;
+
+  // structural graph
+  nodes: Record<string, AssemblyNode>;
+
+  // 🔑 Design-time joint storage
+  joints: Record<string, AssemblyJoint>;
+
+  selectedNodeId: string | null;
+
+  /* =====================================================
+     NEW — Design-Time Validation Feedback
+     ===================================================== */
+
+  validationMessage?: string | null;
+}

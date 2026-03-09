@@ -1,73 +1,51 @@
 // core/validation/cycleValidation.ts
 
-import type { AssemblyState, AssemblyJoint } from "../assemblyTypes";
+import type { AssemblyState } from "../assemblyTypes";
 
 /* =========================================================
-   Cycle Detection
+   Cycle Validation (Structure-Level)
+   Pure — No Mutation
+   Ensures assembly graph remains acyclic (tree invariant)
    ========================================================= */
 
-/**
- * Returns true if adding the given joint would create a cycle
- * in the assembly graph.
- */
-export function wouldCreateCycle(
-  state: AssemblyState,
-  joint: AssemblyJoint
-): boolean {
-  const adjacency = buildAdjacency(state, joint);
-
-  const visited = new Set<string>();
-
-  function dfs(nodeId: string): boolean {
-    if (nodeId === joint.parentId) {
-      return true; // cycle detected
-    }
-
-    if (visited.has(nodeId)) {
-      return false;
-    }
-
-    visited.add(nodeId);
-
-    const children = adjacency.get(nodeId) ?? [];
-    for (const child of children) {
-      if (dfs(child)) return true;
-    }
-
-    return false;
-  }
-
-  return dfs(joint.childId);
-}
+export type CycleValidationResult =
+  | { ok: true }
+  | { ok: false; reason: string };
 
 /* =========================================================
-   Helpers
+   Detect Cycle If childId Is Attached Under parentId
+   ---------------------------------------------------------
+   This checks whether parentId is already a descendant
+   of childId, which would create a cycle.
    ========================================================= */
 
-function buildAdjacency(
+export function validateNoCycle(
   state: AssemblyState,
-  newJoint: AssemblyJoint
-): Map<string, string[]> {
-  const map = new Map<string, string[]>();
+  parentId: string,
+  childId: string
+): CycleValidationResult {
 
-  // existing joints
-  for (const joint of Object.values(state.joints)) {
-    addEdge(map, joint.parentId, joint.childId);
+  // If trying to attach a node to itself
+  if (parentId === childId) {
+    return {
+      ok: false,
+      reason: "Cannot create cycle: node cannot be parent of itself",
+    };
   }
 
-  // proposed joint
-  addEdge(map, newJoint.parentId, newJoint.childId);
+  // Walk upward from parentId
+  let current = state.nodes[parentId];
 
-  return map;
-}
+  while (current.parentId !== null) {
+    if (current.parentId === childId) {
+      return {
+        ok: false,
+        reason: "Cycle detected in assembly hierarchy",
+      };
+    }
 
-function addEdge(
-  map: Map<string, string[]>,
-  from: string,
-  to: string
-) {
-  if (!map.has(from)) {
-    map.set(from, []);
+    current = state.nodes[current.parentId];
   }
-  map.get(from)!.push(to);
+
+  return { ok: true };
 }

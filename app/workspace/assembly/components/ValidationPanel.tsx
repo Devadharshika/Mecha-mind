@@ -1,40 +1,52 @@
 "use client";
 
 import { useAssembly } from "../../../../store/assemblyStore";
+import { diagnoseAssembly } from "../../../../core/validation/assemblyDiagnostics";
 
 export function ValidationPanel() {
   const { state } = useAssembly();
 
-  const hasAnyActuators = Object.values(state.nodes).some(
-    (n) => n.category === "actuator"
-  );
-  const hasAnyPower = Object.values(state.nodes).some(
-    (n) => n.category === "power"
-  );
-
-  const issues: string[] = [];
-  if (!hasAnyActuators) issues.push("No actuators added yet.");
-  if (!hasAnyPower) issues.push("No power source added yet.");
+  const diagnostics = diagnoseAssembly(state);
 
   return (
-    <div className="border border-slate-800 rounded-xl bg-slate-900/60 backdrop-blur p-3 h-[140px] text-xs flex flex-col">
+    <div className="border border-slate-800 rounded-xl bg-slate-900/60 backdrop-blur p-3 h-[180px] text-xs flex flex-col">
       <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-300 mb-1">
-        Quick Checks
+        Validation
       </h2>
+
       <div className="flex-1 overflow-auto space-y-1">
-        {issues.length === 0 ? (
-          <div className="text-emerald-300 text-[11px]">
-            Assembly looks good for now. Keep building.
+
+        {/* 🔴 Reducer-level attachment validation */}
+        {state.validationMessage && (
+          <div className="text-red-300 text-[11px] border border-red-500/40 rounded-md px-2 py-1 bg-red-500/5">
+            {state.validationMessage}
           </div>
-        ) : (
-          issues.map((msg, i) => (
+        )}
+
+        {/* 🔍 Assembly diagnostics */}
+        {diagnostics.map((diag) => {
+          const style =
+            diag.level === "error"
+              ? "text-red-300 border-red-500/40 bg-red-500/5"
+              : diag.level === "warning"
+              ? "text-amber-300 border-amber-500/40 bg-amber-500/5"
+              : "text-slate-300 border-slate-500/40 bg-slate-500/5";
+
+          return (
             <div
-              key={i}
-              className="text-amber-300 text-[11px] border border-amber-500/40 rounded-md px-2 py-1 bg-amber-500/5"
+              key={diag.code}
+              className={`text-[11px] border rounded-md px-2 py-1 ${style}`}
             >
-              {msg}
+              {diag.message}
             </div>
-          ))
+          );
+        })}
+
+        {/* 🟢 Success case */}
+        {!state.validationMessage && diagnostics.length === 0 && (
+          <div className="text-emerald-300 text-[11px]">
+            Assembly looks structurally valid.
+          </div>
         )}
       </div>
     </div>

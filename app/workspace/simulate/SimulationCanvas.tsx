@@ -3,18 +3,27 @@
 import React, { useEffect, useRef } from "react";
 import { Canvas, useThree } from "@react-three/fiber";
 import { OrbitControls, Grid } from "@react-three/drei";
-import {
-  Physics,
-  RigidBody,
-  type RigidBodyApi,
-} from "@react-three/rapier";
 
-import PhysicsGround from "./physics/PhysicsGround";
-import { FixedJointConstraint } from "@/core/sim/joints/fixedJoint";
-import { createBodyRegistry } from "@/core/sim/joints/bodyRegistry";
+/* ------------------------------------------------
+   ⚠ PROTOTYPE PHYSICS (COMMENTED — DO NOT DELETE)
+   These were used when React owned physics.
+   Simulation authority is now simService.
+   May be reused later for debug overlay tools.
+------------------------------------------------- */
+
+// import {
+//   Physics,
+//   RigidBody,
+//   type RigidBodyApi,
+// } from "@react-three/rapier";
+
+// import PhysicsGround from "./physics/PhysicsGround";
+// import { FixedJointConstraint } from "@/core/sim/joints/fixedJoint";
+// import { createBodyRegistry } from "@/core/sim/joints/bodyRegistry";
 
 /* -----------------------------------------
-   Types (USED LATER — DO NOT REMOVE)
+   Types (MIRROR simService OUTPUT)
+   DO NOT ADD SIMULATION LOGIC HERE
 ----------------------------------------- */
 
 type SimEntity = {
@@ -30,6 +39,15 @@ type SimState = {
 
 interface SimulationCanvasProps {
   simState?: SimState | null;
+
+  /*
+    running is intentionally preserved.
+    It will later drive:
+    - visual simulation status overlays
+    - frame stepping diagnostics
+    - performance instrumentation
+    DO NOT REMOVE.
+  */
   running: boolean;
 }
 
@@ -69,19 +87,59 @@ function CameraRig() {
 }
 
 /* -----------------------------------------
-   MAIN CANVAS — PHASE D-3.2
+   Simulation Bodies — PURE VISUAL MIRROR
+   NEVER CREATE PHYSICS HERE
+----------------------------------------- */
+
+function SimulationBodies({ simState }: { simState?: SimState | null }) {
+  if (!simState?.entities) return null;
+
+  const entities = Object.values(simState.entities);
+
+  return (
+    <>
+      {entities.map((entity) => {
+        const pos = entity.position ?? { x: 0, y: 0, z: 0 };
+        const rot = entity.rotation ?? { x: 0, y: 0, z: 0 };
+
+        return (
+          <mesh
+            key={entity.id}
+            position={[pos.x ?? 0, pos.y ?? 0, pos.z ?? 0]}
+            rotation={[rot.x ?? 0, rot.y ?? 0, rot.z ?? 0]}
+            castShadow
+            receiveShadow
+          >
+            <boxGeometry args={[1, 1, 1]} />
+            <meshStandardMaterial color="#22d3ee" />
+          </mesh>
+        );
+      })}
+    </>
+  );
+}
+
+/* -----------------------------------------
+   MAIN CANVAS — PASSIVE RENDERER
 ----------------------------------------- */
 
 export default function SimulationCanvas({
   simState = null,
-  running,
+  running, // preserved for future
 }: SimulationCanvasProps) {
-  // Registry survives renders
-  const bodyRegistry = useRef(createBodyRegistry());
+
+  /*
+    Future expansion point:
+    if (running) {
+      // could show visual indicator / HUD
+    }
+    DO NOT REMOVE running even if unused.
+  */
 
   return (
     <div className="w-full h-full">
       <Canvas shadows camera={{ fov: 55, near: 0.1, far: 500 }}>
+
         <color attach="background" args={["#0b0f19"]} />
         <fog attach="fog" args={["#0b0f19", 10, 80]} />
 
@@ -93,57 +151,20 @@ export default function SimulationCanvas({
           color="#55ccff"
         />
 
-        <Physics
-          key={simState?.resetId}
-          gravity={[0, -9.81, 0]}
-          paused={!running}
-        >
-          <PhysicsGround />
+        {/* -----------------------------------------
+            Render Simulation Entities
+            Source of truth: simService
+        ----------------------------------------- */}
+        <SimulationBodies simState={simState} />
 
-          {/* Body A */}
-          <RigidBody
-            ref={(api: RigidBodyApi | null) => {
-              if (api) bodyRegistry.current.set("bodyA", api);
-            }}
-            colliders="cuboid"
-            position={[0, 4, 0]}
-          >
-            <mesh castShadow>
-              <boxGeometry args={[1, 1, 1]} />
-              <meshStandardMaterial color="#22d3ee" />
-            </mesh>
-          </RigidBody>
-
-          {/* Body B */}
-          <RigidBody
-            ref={(api: RigidBodyApi | null) => {
-              if (api) bodyRegistry.current.set("bodyB", api);
-            }}
-            colliders="cuboid"
-            position={[0, 5.2, 0]}
-          >
-            <mesh castShadow>
-              <boxGeometry args={[1, 1, 1]} />
-              <meshStandardMaterial color="#0ea5e9" />
-            </mesh>
-          </RigidBody>
-
-          {/* Fixed Joint */}
-          <FixedJointConstraint
-            joint={{
-              id: "test-fixed",
-              type: "fixed",
-              parentId: "bodyA",
-              childId: "bodyB",
-            }}
-            bodyA={bodyRegistry.current.get("bodyA")}
-            bodyB={bodyRegistry.current.get("bodyB")}
-          />
-        </Physics>
-
+        {/* -----------------------------------------
+            Scene Helpers
+        ----------------------------------------- */}
         <Grid infiniteGrid />
         <axesHelper args={[2]} />
+
         <CameraRig />
+
       </Canvas>
     </div>
   );

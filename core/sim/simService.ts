@@ -1,6 +1,5 @@
-// core/sim/simService.ts
-
 import type { AssemblyState } from "../assemblyTypes";
+import type { CompiledSimulationSpec } from "../compiler/types";
 
 import { TelemetryBus } from "./telemetry/TelemetryBus";
 import type { TelemetryFrame } from "./telemetry/telemetryTypes";
@@ -12,8 +11,6 @@ import type { MotionCommand } from "./motors/commands";
 
 import { JointPhysicsEngine } from "./joints/JointPhysicsEngine";
 
-// ⚠️ D-3 Physics Engine (RAW)
-// We keep this import explicit and isolated
 import * as RAPIER from "@dimforge/rapier3d-compat";
 
 /* -------------------------------------------------
@@ -29,11 +26,11 @@ export interface SimEntity {
 }
 
 export interface SimState {
-  resetId: number;                 // 🔑 world identity
+  resetId: number;
   entities: Record<string, SimEntity>;
   running: boolean;
-  time: number; // simulation time (seconds)
-  step: number; // fixed step count
+  time: number;
+  step: number;
 }
 
 type Subscriber = (state: SimState) => void;
@@ -49,10 +46,9 @@ const FIXED_DT = 1 / 60;
 ------------------------------------------------- */
 
 class SimService {
-  // 🔑 reset counter
+
   private resetCounter = 0;
 
-  // authoritative simulation state
   private _state: SimState = {
     resetId: 0,
     entities: {},
@@ -64,18 +60,27 @@ class SimService {
   private lastSnapshot: Record<string, SimEntity> | null = null;
   private subscribers = new Set<Subscriber>();
   private rafId: number | null = null;
+  private currentSpecHash: string | null = null;
+  private currentSpec: CompiledSimulationSpec | null = null;
   private lastFrameTime = 0;
 
   /* -------------------------------------------------
-     D-3 Physics World (EXECUTION)
+     D-3 Physics World
   ------------------------------------------------- */
 
   private rapier = RAPIER;
+  private rapierInitialized = false;
   private physicsWorld: RAPIER.World | null = null;
   private jointPhysics: JointPhysicsEngine | null = null;
 
   /* -------------------------------------------------
-     D-4 Telemetry (READ-ONLY)
+     D-3.2 Body Registry
+  ------------------------------------------------- */
+
+  private bodyHandles = new Map<string, RAPIER.RigidBody>();
+
+  /* -------------------------------------------------
+     D-4 Telemetry
   ------------------------------------------------- */
 
   private telemetryBus = new TelemetryBus({ maxHistory: 300 });
@@ -83,14 +88,12 @@ class SimService {
   private bodySampler = new BodyTelemetrySampler(null);
 
   /* -------------------------------------------------
-     D-5 Control (INTENT ONLY)
+     D-5 Control
   ------------------------------------------------- */
 
   private controlBus = new ControlBus();
 
-  /* ---------------------------------------------
-     Public accessors
-  --------------------------------------------- */
+  /* --------------------------------------------- */
 
   get state(): SimState {
     return this._state;
@@ -104,9 +107,7 @@ class SimService {
     return this.controlBus;
   }
 
-  /* ---------------------------------------------
-     Subscription API
-  --------------------------------------------- */
+  /* --------------------------------------------- */
 
   subscribe(fn: Subscriber): () => void {
     this.subscribers.add(fn);
@@ -118,60 +119,29 @@ class SimService {
     for (const fn of this.subscribers) fn(this._state);
   }
 
-  /* ---------------------------------------------
-     Snapshot from Assembly
-  --------------------------------------------- */
+  /* -------------------------------------------------
+   Spec-driven initialization
+------------------------------------------------- */
 
-  createSnapshotFromAssembly(assembly: AssemblyState) {
-    const entities: Record<string, SimEntity> = {};
+async initializeFromSpec(spec: CompiledSimulationSpec) {
 
-    for (const nodeId in assembly.nodes) {
-      entities[nodeId] = {
-        id: nodeId,
-        position: { x: 0, y: 0, z: 0 },
-        rotation: { x: 0, y: 0, z: 0 },
-      };
-    }
+  Object.freeze(spec);
+  Object.freeze(spec.bodies);
+  Object.freeze(spec.joints);
 
-    this.lastSnapshot = structuredClone(entities);
+  // If hash changed, rebuild
+  if (this.currentSpecHash !== spec.hash) {
+    this.currentSpecHash = spec.hash;
+    this.currentSpec = spec;
 
-    this._state = {
-      resetId: ++this.resetCounter,
-      entities,
-      running: false,
-      time: 0,
-      step: 0,
-    };
-
-    /* -----------------------------------------
-       D-3 World Initialization
-    ----------------------------------------- */
-
-    this.physicsWorld = new this.rapier.World({
-      x: 0,
-      y: -9.81,
-      z: 0,
-    });
-
-    this.jointPhysics = new JointPhysicsEngine(
-      this.physicsWorld,
-      this.rapier
-    );
-
-    // Wire physics into telemetry samplers
-    this.jointSampler = new JointTelemetrySampler(this.physicsWorld);
-    this.bodySampler = new BodyTelemetrySampler(this.physicsWorld);
-
-    // Reset auxiliary layers
-    this.telemetryBus.reset(this._state.resetId);
-    this.controlBus.reset();
-
-    this.notify();
+    await this.rebuildWorldFromSpec(spec);
+    return;
   }
 
-  /* ---------------------------------------------
-     Simulation Control
-  --------------------------------------------- */
+  // If identical spec, do nothing
+  console.warn("[SimService] Spec identical — skipping reinit");
+}
+  /* --------------------------------------------- */
 
   start() {
     if (this._state.running) return;
@@ -188,45 +158,46 @@ class SimService {
     this.rafId = null;
     this.notify();
   }
+  /* -------------------------------------------------
+   Deterministic Single Step (Research API)
+------------------------------------------------- */
 
-  reset() {
-    this.pause();
-    if (!this.lastSnapshot) return;
+stepOnce(dt: number = FIXED_DT) {
 
-    this._state = {
-      resetId: ++this.resetCounter,
-      entities: structuredClone(this.lastSnapshot),
-      running: false,
-      time: 0,
-      step: 0,
-    };
+  if (!this.physicsWorld) return;
 
-    this.physicsWorld = null;
-    this.jointPhysics = null;
+  // Ensure simulation is not running
+  this.pause();
 
-    this.telemetryBus.reset(this._state.resetId);
-    this.controlBus.reset();
+  this.integrate(dt);
 
-    this.notify();
+  this.notify();
+}
+
+  async reset() {
+
+  this.pause();
+
+  if (!this.currentSpec) {
+    console.warn("[SimService] Reset called without compiled spec.");
+    return;
   }
 
-  stepOnce() {
-    this.integrate(FIXED_DT);
-    this.notify();
-  }
-
-  /* ---------------------------------------------
-     Main Loop
-  --------------------------------------------- */
+  await this.rebuildWorldFromSpec(this.currentSpec);
+}
+  /* --------------------------------------------- */
 
   private loop = () => {
+
     if (!this._state.running) return;
 
     const now = performance.now();
     const deltaMs = now - this.lastFrameTime;
+
     this.lastFrameTime = now;
 
     let acc = Math.min(deltaMs / 1000, 0.05);
+
     while (acc >= FIXED_DT) {
       this.integrate(FIXED_DT);
       acc -= FIXED_DT;
@@ -236,23 +207,147 @@ class SimService {
     this.rafId = requestAnimationFrame(this.loop);
   };
 
-  /* ---------------------------------------------
-     Integration Step
-  --------------------------------------------- */
+  /* --------------------------------------------- */
+private async rebuildWorldFromSpec(spec: CompiledSimulationSpec) {
 
+  if (!this.rapierInitialized) {
+    await this.rapier.init();
+    this.rapierInitialized = true;
+  }
+
+  this.physicsWorld = new this.rapier.World({
+    x: spec.world.gravity[0],
+    y: spec.world.gravity[1],
+    z: spec.world.gravity[2],
+  });
+
+  const groundDesc = this.rapier.RigidBodyDesc.fixed();
+  groundDesc.setTranslation(0, -5, 0);
+  const groundBody = this.physicsWorld.createRigidBody(groundDesc);
+  const groundCollider = this.rapier.ColliderDesc.cuboid(20, 0.2, 20);
+  this.physicsWorld.createCollider(groundCollider, groundBody);
+
+  this.bodyHandles.clear();
+
+  this.jointPhysics = new JointPhysicsEngine(
+    this.physicsWorld,
+    this.rapier
+  );
+
+  const entities: Record<string, SimEntity> = {};
+
+  for (const body of spec.bodies) {
+
+    const desc = this.rapier.RigidBodyDesc.dynamic();
+
+    desc.setTranslation(
+      body.worldPosition[0],
+      body.worldPosition[1],
+      body.worldPosition[2]
+    );
+
+    desc.setRotation({
+      x: body.worldRotation[0],
+      y: body.worldRotation[1],
+      z: body.worldRotation[2],
+      w: body.worldRotation[3],
+    });
+
+    const rb = this.physicsWorld.createRigidBody(desc);
+
+    const [sx, sy, sz] = body.size;
+
+// Rapier expects HALF extents
+const colliderDesc = this.rapier.ColliderDesc.cuboid(
+  sx / 2,
+  sy / 2,
+  sz / 2
+);
+
+this.physicsWorld.createCollider(colliderDesc, rb);
+
+    this.bodyHandles.set(body.runtimeId, rb);
+
+    entities[body.runtimeId] = {
+      id: body.runtimeId,
+      position: {
+        x: body.worldPosition[0],
+        y: body.worldPosition[1],
+        z: body.worldPosition[2],
+      },
+      rotation: { x: 0, y: 0, z: 0 },
+    };
+  }
+
+  for (const joint of spec.joints) {
+
+    const parent = this.bodyHandles.get(joint.parentRuntimeId);
+    const child = this.bodyHandles.get(joint.childRuntimeId);
+
+    if (!parent || !child) continue;
+
+    this.jointPhysics?.createJoint(
+      {
+        id: joint.runtimeId,
+        type: joint.type.toLowerCase(),
+        parentAnchor: { x: 0, y: 0, z: 0 },
+        childAnchor: { x: 0, y: 0, z: 0 },
+      } as any,
+      parent,
+      child
+    );
+  }
+
+  this.lastSnapshot = structuredClone(entities);
+
+  this._state = {
+    resetId: ++this.resetCounter,
+    entities,
+    running: false,
+    time: 0,
+    step: 0,
+  };
+
+  this.jointSampler = new JointTelemetrySampler(this.physicsWorld);
+  this.bodySampler = new BodyTelemetrySampler(this.physicsWorld);
+
+  this.telemetryBus.reset(this._state.resetId);
+  this.controlBus.reset();
+
+  this.notify();
+}
   private integrate(dt: number) {
-    // --- Physics step (D-3) ---
+  
+
     if (this.physicsWorld) {
       this.physicsWorld.timestep = dt;
       this.physicsWorld.step();
     }
 
+    /* -----------------------------------------
+       Transform Sync
+    ----------------------------------------- */
+
+    for (const [runtimeId, body] of this.bodyHandles.entries()) {
+
+      const translation = body.translation();
+     
+      const rotation = body.rotation();
+
+      const entity = this._state.entities[runtimeId];
+      if (!entity) continue;
+
+      entity.position.x = translation.x;
+      entity.position.y = translation.y;
+      entity.position.z = translation.z;
+
+      entity.rotation.x = rotation.x;
+      entity.rotation.y = rotation.y;
+      entity.rotation.z = rotation.z;
+    }
+
     this._state.time += dt;
     this._state.step += 1;
-
-    /* -----------------------------------------
-       D-4 Telemetry Sampling
-    ----------------------------------------- */
 
     const frame: TelemetryFrame = {
       time: {
@@ -273,10 +368,6 @@ class SimService {
 
     this.telemetryBus.push(frame);
 
-    /* -----------------------------------------
-       D-5 Control → D-3.5 Motion
-    ----------------------------------------- */
-
     const commands: MotionCommand[] =
       this.controlBus.getFrame(
         this._state.resetId,
@@ -290,9 +381,5 @@ class SimService {
     }
   }
 }
-
-/* -------------------------------------------------
-   Export singleton
-------------------------------------------------- */
 
 export const simService = new SimService();

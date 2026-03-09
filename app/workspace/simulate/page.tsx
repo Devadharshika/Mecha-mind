@@ -29,73 +29,132 @@ const controlModes = [
   { id: "auto", label: "Autonomous Script" },
 ];
 
-/* --- NEW: sim core + store imports --- */
-import { useAssembly } from "../../../store/assemblyStore"; // relative from app/workspace/simulate/page.tsx
+/* --- sim core + store imports --- */
+import { useAssembly } from "../../../store/assemblyStore";
 import { simService } from "../../../core/sim/simService";
 import { applySimToAssembly } from "../../../core/sim/sync";
 
+/* --- NEW: compiler pipeline --- */
+import { compileFromAssembly } from "../../../core/runtime/compileRuntime";
+
 /* --- Page component --- */
 export default function SimulateRobotsPage() {
-  // existing UI state
+
   const [selectedRobot, setSelectedRobot] = useState("arm6dof");
   const [controlMode, setControlMode] = useState("direct");
   const [isRunning, setIsRunning] = useState(false);
+  const [simState, setSimState] = useState<any>(null);
 
-  // sim related UI state
   const [entityCount, setEntityCount] = useState(0);
   const unsubRef = useRef<(() => void) | null>(null);
 
-  // get assembly store (state + dispatch) via your hook
   const { state: assemblyState, dispatch } = useAssembly();
 
   /* -------------------------
-     Snapshot + subscription
+     Simulation Initialization
      ------------------------- */
+
   useEffect(() => {
-    // create a sim snapshot from the current assembly state
-    // safe to call repeatedly; this refreshes sim state to match assembly
-    try {
-      simService.createSnapshotFromAssembly(assemblyState);
-    } catch (e) {
-      // fail gracefully in dev - service should exist
-      // console.error("sim snapshot error", e);
-    }
 
-    // subscribe to sim updates (entity counts, telemetry, etc.)
-    const unsub = simService.subscribe((s) => {
-      setEntityCount(Object.keys(s.entities).length);
-    });
-    unsubRef.current = unsub;
+  const timer = setTimeout(() => {
 
-    // cleanup
-    return () => {
-      if (unsubRef.current) unsubRef.current();
-      unsubRef.current = null;
-    };
-    // Recreate snapshot when the assembly root or nodes change.
-    // If your assemblyState is a new object every render, you may want to depend on rootId only.
-  }, [assemblyState]); // intentionally resnapshot on assembly changes
+    (async () => {
 
-  /* -------------------------
-     Controls (Start / Pause / Step / Apply)
-     ------------------------- */
-  function onStart() {
-    simService.start();
-    setIsRunning(true);
-  }
-  function onPause() {
-    simService.pause();
-    setIsRunning(false);
-  }
-  function onStep() {
-    simService.stepOnce();
-  }
-  function onApply() {
-    // apply sim transforms back into the assembly store using dispatch
-    // applySimToAssembly expects your dispatch from useAssembly
-    applySimToAssembly(dispatch);
-  }
+      /* -------------------------------------------------
+         OLD SNAPSHOT PIPELINE (COMMENTED — DO NOT DELETE)
+         This was the legacy assembly → snapshot path.
+         Kept for historical reference and potential rollback.
+      ------------------------------------------------- */
 
+      // try {
+      //   simService.createSnapshotFromAssembly(assemblyState);
+      // } catch (e) {
+      //   console.error("sim snapshot error", e);
+      // }
+
+      /* -------------------------------------------------
+         NEW PIPELINE (CORE-OWNED)
+         Assembly → Runtime Orchestrator → Compiler → Simulation
+         UI must NOT directly call compileAssembly anymore.
+      ------------------------------------------------- */
+
+      try {
+
+        await compileFromAssembly(assemblyState);
+
+        /* -------------------------------------------------
+           FUTURE: Compile diagnostics channel
+           When we formalize compile reporting,
+           this is where UI can consume structured status.
+        ------------------------------------------------- */
+
+        // const result = await compileFromAssembly(assemblyState);
+        // if (!result.success) {
+        //   console.error("Compile errors:", result.errors);
+        // }
+
+      } catch (err) {
+        console.error("Simulation compile error", err);
+      }
+
+    })();
+
+  }, 50);
+
+  /* -------------------------------------------------
+     Simulation Subscription (UNCHANGED)
+     UI observes simService state.
+  ------------------------------------------------- */
+
+  const unsub = simService.subscribe((s) => {
+    setSimState(s);
+    setEntityCount(Object.keys(s.entities ?? {}).length);
+  });
+
+  unsubRef.current = unsub;
+
+  return () => {
+    clearTimeout(timer);
+
+    if (unsubRef.current) unsubRef.current();
+    unsubRef.current = null;
+  };
+
+}, [assemblyState]);
+/* -------------------------
+   Transport Controls
+   UI layer invokes simService only.
+------------------------- */
+
+function onStart() {
+  simService.start();
+  setIsRunning(true);
+}
+
+function onPause() {
+  simService.pause();
+  setIsRunning(false);
+}
+
+/* -------------------------------------------------
+   FUTURE: Step execution (not implemented yet)
+------------------------------------------------- */
+
+// function onStep() {
+//   simService.stepOnce();
+// }
+
+function onStep() {
+  console.warn("Step simulation not implemented in current simService.");
+}
+
+/* -------------------------------------------------
+   Apply simulation state back to assembly (future)
+------------------------------------------------- */
+
+function onApply() {
+  applySimToAssembly(dispatch);
+}
   /* -------------------------
      (rest of your existing UI layout below - unchanged except wiring)
      ------------------------- */
@@ -172,7 +231,7 @@ export default function SimulateRobotsPage() {
               </p>
             </div>*/}
             <div className="absolute inset-0">
-                 <SimulationCanvas running={isRunning} />
+                 <SimulationCanvas simState={simState} running={isRunning} />
             
             </div>
 

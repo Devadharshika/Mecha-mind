@@ -6,6 +6,8 @@ import { applySimToAssembly } from "../../../core/sim/sync";
 import { useAssembly } from "../../../store/assemblyStore";
 import SimulationCanvas from "./SimulationCanvas";
 
+import { compileAssembly } from "../../../core/compiler/compileAssembly";
+
 export default function SimulationShell() {
   const { state: assemblyState, dispatch } = useAssembly();
 
@@ -18,9 +20,72 @@ export default function SimulationShell() {
   const unsubRef = useRef<null | (() => void)>(null);
 
   useEffect(() => {
+
+    /* -------------------------------------------------
+       OLD TIMER WRAPPER (COMMENTED — DO NOT DELETE)
+       This sometimes prevented the compiler from running
+       due to React cleanup timing.
+    ------------------------------------------------- */
+
+    /*
     const timer = setTimeout(() => {
-      simService.createSnapshotFromAssembly(assemblyState);
+      (async () => {
+    */
+
+    (async () => {
+
+      /* -------------------------------------------------
+         OLD PROTOTYPE PATH (COMMENTED — DO NOT DELETE)
+      ------------------------------------------------- */
+
+      // simService.createSnapshotFromAssembly(assemblyState);
+
+      /* -------------------------------------------------
+         NEW PIPELINE
+         Assembly → Compiler → Simulation
+      ------------------------------------------------- */
+
+      console.log("ASSEMBLY STATE", assemblyState);
+
+      const result = await compileAssembly(assemblyState);
+
+      /* -------------------------------------------------
+         DIAGNOSTIC OUTPUT
+         (THIS WILL TELL US EXACTLY WHAT FAILED)
+      ------------------------------------------------- */
+
+      console.log("=== COMPILER RESULT ===");
+      console.log(result);
+
+      if (!result.success) {
+        console.error("=== COMPILER ERRORS ===");
+        console.error(result.errors);
+        return;
+      }
+
+      if (!result.spec) {
+        console.error("Compiler returned success but spec is missing.");
+        return;
+      }
+
+      console.log("=== COMPILED BODIES ===");
+      console.log(result.spec.bodies);
+
+      console.log("=== COMPILED JOINTS ===");
+      console.log(result.spec.joints);
+
+      /* -------------------------------------------------
+         INITIALIZE SIMULATION
+      ------------------------------------------------- */
+
+      simService.initializeFromSpec(result.spec);
+
+    })();
+
+    /*
+      })();
     }, 50);
+    */
 
     let rafId: number | null = null;
 
@@ -31,7 +96,7 @@ export default function SimulationShell() {
         rafId = null;
         setSimState(s);
         setEntityCount(Object.keys(s.entities ?? {}).length);
-        setRunning(s.running); // 🔑 SINGLE SOURCE OF TRUTH
+        setRunning(s.running);
       });
     });
 
@@ -41,10 +106,17 @@ export default function SimulationShell() {
     };
 
     return () => {
-      clearTimeout(timer);
+
+      /* -------------------------------------------------
+         OLD TIMER CLEANUP (COMMENTED — DO NOT DELETE)
+      ------------------------------------------------- */
+
+      // clearTimeout(timer);
+
       unsubRef.current?.();
       unsubRef.current = null;
     };
+
   }, [assemblyState]);
 
   function onStart() {
@@ -56,7 +128,7 @@ export default function SimulationShell() {
   }
 
   function onReset() {
-    simService.reset(); // 🔑 HARD RESET (no args)
+    simService.reset();
   }
 
   function onApply() {
@@ -65,7 +137,9 @@ export default function SimulationShell() {
 
   return (
     <div className="w-full h-full flex flex-col">
+
       <div className="p-2 bg-slate-900 border-b border-slate-800 text-slate-300 text-xs flex items-center gap-4">
+
         <span>Entities: {entityCount}</span>
 
         {running ? (
@@ -89,14 +163,16 @@ export default function SimulationShell() {
         <div className="ml-auto text-[11px] text-slate-400">
           {running ? "Running" : "Idle"}
         </div>
+
       </div>
 
       <div className="flex-1 bg-neutral-900">
         <SimulationCanvas
           simState={simState}
-          running={running} // 🔑 PASS CLOCK DOWN
+          running={running}
         />
       </div>
+
     </div>
   );
 }

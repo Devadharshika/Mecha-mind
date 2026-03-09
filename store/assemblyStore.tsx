@@ -1,4 +1,3 @@
-// store/assemblyStore.tsx
 "use client";
 
 import React, {
@@ -14,9 +13,13 @@ import type {
   AssemblyNode,
   AssemblyJoint,
   RobotType,
+  PartCategory,
 } from "../core/assemblyTypes";
 
+import { createRoverV1Assembly } from "../core/assemblies/rover_v1";
 import { uid } from "../core/uid";
+import { canAttach } from "../core/validation/attachmentRules";
+import { validateJoint } from "../core/validation/jointValidation";
 
 /* =========================================================
    Actions supported by the assembly reducer
@@ -29,7 +32,7 @@ type AssemblyAction =
       type: "ADD_PART";
       partId: string;
       name: string;
-      category: AssemblyNode["category"];
+      category: PartCategory;
     }
   | { type: "RENAME_NODE"; nodeId: string; name: string }
   | {
@@ -40,41 +43,41 @@ type AssemblyAction =
         rot?: [number, number, number];
       };
     }
-  // 🔑 NEW — design-time joint storage (NO behavior)
   | {
       type: "ADD_JOINT";
       joint: AssemblyJoint;
-    };
+    }
+  /* ---------------------------------------------------------
+     NEW — Explicit Joint Removal (annotation only)
+     --------------------------------------------------------- */
+  | {
+      type: "REMOVE_JOINT";
+      jointId: string;
+    }
+  /* ---------------------------------------------------------
+     NEW — Deterministic subtree removal
+     --------------------------------------------------------- */
+  | { type: "REMOVE_NODE"; nodeId: string };
 
 /* =========================================================
    Initial Assembly State
    ========================================================= */
 
-function createInitialState(): AssemblyState {
-  const rootId = uid("root");
+/*
+   OLD initializer preserved for future generic reset support.
+   Not deleted intentionally.
 
-  const rootNode: AssemblyNode = {
-    id: rootId,
-    name: "Base",
-    partId: "mm-str-base-link",
-    category: "structure",
-    parentId: null,
-    children: [],
-    transform: {
-      pos: [0, 0, 0],
-      rot: [0, 0, 0],
-    },
-  };
+function createInitialState(): AssemblyState {
+  ...
+}
+*/
+
+function createInitialState(): AssemblyState {
+  const base = createRoverV1Assembly();
 
   return {
-    robotType: "generic",
-    rootId,
-    nodes: { [rootId]: rootNode },
-
-    // 🔑 Design-time joint storage (empty by default)
-    joints: {},
-
-    selectedNodeId: rootId,
+    ...base,
+    validationMessage: null,
   };
 }
 
@@ -91,12 +94,33 @@ function assemblyReducer(
       return { ...state, robotType: action.robotType };
 
     case "SELECT_NODE":
-      return { ...state, selectedNodeId: action.nodeId };
+      return {
+        ...state,
+        selectedNodeId: action.nodeId,
+        validationMessage: null,
+      };
 
     case "ADD_PART": {
       const parentId = state.selectedNodeId ?? state.rootId;
       const parent = state.nodes[parentId];
       if (!parent) return state;
+
+      const parentCategory =
+        parent.category === "root"
+          ? "root"
+          : parent.category;
+
+      const allowed = canAttach(
+        parentCategory,
+        action.category
+      );
+
+      if (!allowed) {
+        return {
+          ...state,
+          validationMessage: `Cannot attach ${action.category} to ${parent.category}`,
+        };
+      }
 
       const id = uid("node");
 
@@ -120,6 +144,7 @@ function assemblyReducer(
           },
         },
         selectedNodeId: id,
+        validationMessage: null,
       };
     }
 
@@ -163,16 +188,123 @@ function assemblyReducer(
       };
     }
 
-    // 🔑 NEW — ADD_JOINT (design-time only)
     case "ADD_JOINT": {
-      const joint = action.joint;
+      const result = validateJoint(state, action.joint);
+
+      if (!result.ok) {
+        return {
+          ...state,
+          validationMessage: result.reason,
+        };
+      }
 
       return {
         ...state,
         joints: {
           ...state.joints,
-          [joint.id]: joint,
+          [action.joint.id]: action.joint,
         },
+        validationMessage: null,
+      };
+    }
+
+    /* =========================================================
+       REMOVE_JOINT — Pure annotation deletion
+       Does NOT modify structure.
+       ========================================================= */
+
+    case "REMOVE_JOINT": {
+      const jointId = action.jointId;
+
+      if (!state.joints[jointId]) {
+        return state;
+      }
+
+      const newJoints = { ...state.joints };
+      delete newJoints[jointId];
+
+      return {
+        ...state,
+        joints: newJoints,
+        validationMessage: null,
+      };
+    }
+
+    /* =========================================================
+       REMOVE_NODE — Deterministic Subtree Deletion
+       ========================================================= */
+
+    case "REMOVE_NODE": {
+      const targetId = action.nodeId;
+
+      if (targetId === state.rootId) {
+        return {
+          ...state,
+          validationMessage:
+            "Root node cannot be removed. Start a new assembly instead.",
+        };
+      }
+
+      const targetNode = state.nodes[targetId];
+      if (!targetNode) return state;
+
+      const removedIds = new Set<string>();
+
+      function collect(id: string) {
+        if (removedIds.has(id)) return;
+        removedIds.add(id);
+
+        const node = state.nodes[id];
+        if (!node) return;
+
+        for (const childId of node.children) {
+          collect(childId);
+        }
+      }
+
+      collect(targetId);
+
+      const newNodes: typeof state.nodes = {};
+
+      for (const [id, node] of Object.entries(state.nodes)) {
+        if (!removedIds.has(id)) {
+          newNodes[id] = { ...node };
+        }
+      }
+
+      const parentId = targetNode.parentId;
+      if (parentId && newNodes[parentId]) {
+        newNodes[parentId] = {
+          ...newNodes[parentId],
+          children: newNodes[parentId].children.filter(
+            (id) => id !== targetId
+          ),
+        };
+      }
+
+      const newJoints: typeof state.joints = {};
+
+      for (const [id, joint] of Object.entries(state.joints)) {
+        if (
+          !removedIds.has(joint.parentId) &&
+          !removedIds.has(joint.childId)
+        ) {
+          newJoints[id] = joint;
+        }
+      }
+
+      const newSelected =
+        state.selectedNodeId &&
+        removedIds.has(state.selectedNodeId)
+          ? state.rootId
+          : state.selectedNodeId;
+
+      return {
+        ...state,
+        nodes: newNodes,
+        joints: newJoints,
+        selectedNodeId: newSelected,
+        validationMessage: null,
       };
     }
 
