@@ -12,6 +12,7 @@ import type { MotionCommand } from "./motors/commands";
 import { JointPhysicsEngine } from "./joints/JointPhysicsEngine";
 
 import * as RAPIER from "@dimforge/rapier3d-compat";
+import { ExecutionManager } from "../planning/ExecutionManager";
 
 /* -------------------------------------------------
    Types
@@ -93,6 +94,12 @@ class SimService {
 
   private controlBus = new ControlBus();
 
+    /* -------------------------------------------------
+     D-6 Planning (Execution Orchestration)
+  ------------------------------------------------- */
+
+  private executionManager = new ExecutionManager();
+
   /* --------------------------------------------- */
 
   get state(): SimState {
@@ -105,6 +112,9 @@ class SimService {
 
   get control(): ControlBus {
     return this.controlBus;
+  }
+    get execution() {
+    return this.executionManager;
   }
 
   /* --------------------------------------------- */
@@ -349,6 +359,12 @@ this.physicsWorld.createCollider(colliderDesc, rb);
     this._state.time += dt;
     this._state.step += 1;
 
+    // --------------------------------------------------
+// D-6 Execution Update (Phase 2 Minimal Wiring)
+// --------------------------------------------------
+
+this.executionManager.update(this._state.time);
+
     const frame: TelemetryFrame = {
       time: {
         time: this._state.time,
@@ -383,3 +399,10 @@ this.physicsWorld.createCollider(colliderDesc, rb);
 }
 
 export const simService = new SimService();
+/* -------------------------------------------------
+   DEBUG ONLY: expose simService to browser console
+   REMOVE or COMMENT before production hardening
+------------------------------------------------- */
+if (typeof window !== "undefined") {
+  (window as any).simService = simService;
+}
